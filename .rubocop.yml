@@ -1,6 +1,13 @@
 AllCops:
   NewCops: enable
 
+Metrics/AbcSize:
+  Exclude:
+    - 'test/**/*'
+Metrics/MethodLength:
+  Exclude:
+    - 'test/**/*'
+
 Gemspec/AddRuntimeDependency: # new in 1.65
   Enabled: true
 Gemspec/AttributeAssignment: # new in 1.77
