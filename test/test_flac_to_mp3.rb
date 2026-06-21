@@ -222,7 +222,47 @@ class ConverterDirRenameTest < Minitest::Test
     assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album 320_kbps')
   end
 
-  def test_rename_flac_directories_renames_matching_dirs
+  def test_new_dir_path_removes_parenthesised_bitrate
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album (320kbps)')
+  end
+
+  def test_new_dir_path_removes_bracket_bit_depth_sample_rate
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album [24Bit-44.1kHz]')
+  end
+
+  def test_new_dir_path_cleans_non_flac_bracket_tag
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album [Hunter]')
+  end
+
+  def test_new_dir_path_cleans_compound_tag_string
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album [24Bit-44.1kHz] FLAC [PMEDIA] ⭐️')
+  end
+
+  def test_new_dir_path_removes_uploader_handle_after_bracket
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album [FLAC]-Sc4r3cr0w')
+  end
+
+  def test_new_dir_path_removes_sample_rate_pair
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album flac 24-48')
+  end
+
+  def test_new_dir_path_removes_trailing_sample_rate_number
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album [FLAC] 88')
+  end
+
+  def test_new_dir_path_removes_parenthesised_flac
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album (flac)')
+  end
+
+  def test_rename_directories_renames_matching_dirs
     setup_temp_dir(
       'Artist - Album [Flac 16-44]/track.mp3' => '',
       'Artist2 - Album [FLAC]/track.mp3' => '',
@@ -230,7 +270,7 @@ class ConverterDirRenameTest < Minitest::Test
     )
 
     conv = FlacToMp3::Converter.new(path: @tmpdir)
-    conv.rename_flac_directories
+    conv.rename_directories
 
     refute Dir.exist?(File.join(@tmpdir, 'Artist - Album [Flac 16-44]'))
     assert Dir.exist?(File.join(@tmpdir, 'Artist - Album'))
@@ -241,11 +281,23 @@ class ConverterDirRenameTest < Minitest::Test
     teardown_temp_dir
   end
 
-  def test_rename_flac_directories_dry_run_does_not_rename
+  def test_rename_directories_cleans_non_flac_dirs
+    setup_temp_dir('Artist - Album [Hunter]/track.mp3' => '')
+
+    conv = FlacToMp3::Converter.new(path: @tmpdir)
+    conv.rename_directories
+
+    refute Dir.exist?(File.join(@tmpdir, 'Artist - Album [Hunter]'))
+    assert Dir.exist?(File.join(@tmpdir, 'Artist - Album'))
+  ensure
+    teardown_temp_dir
+  end
+
+  def test_rename_directories_dry_run_does_not_rename
     setup_temp_dir('Artist - Album [FLAC]/track.mp3' => '')
 
     conv = FlacToMp3::Converter.new(path: @tmpdir, dry_run: true)
-    conv.rename_flac_directories
+    conv.rename_directories
 
     assert Dir.exist?(File.join(@tmpdir, 'Artist - Album [FLAC]')),
            'dry-run should not rename the directory'
@@ -253,25 +305,25 @@ class ConverterDirRenameTest < Minitest::Test
     teardown_temp_dir
   end
 
-  def test_rename_flac_directories_increments_stats
+  def test_rename_directories_increments_stats
     setup_temp_dir(
       'Artist - Album [FLAC]/track.mp3' => '',
       'Another [Flac 24-96]/track.mp3' => ''
     )
 
     conv = FlacToMp3::Converter.new(path: @tmpdir)
-    conv.rename_flac_directories
+    conv.rename_directories
 
     assert_equal 2, conv.stats[:dirs_renamed]
   ensure
     teardown_temp_dir
   end
 
-  def test_rename_flac_directories_handles_nested_dirs
+  def test_rename_directories_handles_nested_dirs
     setup_temp_dir('Artist [FLAC]/Album [Flac 16-44]/track.mp3' => '')
 
     conv = FlacToMp3::Converter.new(path: @tmpdir)
-    conv.rename_flac_directories
+    conv.rename_directories
 
     assert Dir.exist?(File.join(@tmpdir, 'Artist', 'Album'))
     refute Dir.exist?(File.join(@tmpdir, 'Artist [FLAC]'))
