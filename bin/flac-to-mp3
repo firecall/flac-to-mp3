@@ -1,0 +1,119 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# FLAC to MP3 Converter
+#
+# Converts all .flac files under a directory tree to .mp3 using ffmpeg.
+# Removes originals after successful conversion and strips "FLAC" from filenames.
+#
+# Usage:
+#   bin/flac-to-mp3                           # uses FLAC_MUSIC_PATH env var or default
+#   bin/flac-to-mp3 --path /my/music          # explicit path
+#   bin/flac-to-mp3 --path /my/music --dry-run  # preview only, no changes
+#   bin/flac-to-mp3 --help                    # show help
+#
+# Environment:
+#   FLAC_MUSIC_PATH   Default directory to scan (falls back to built-in default)
+
+require "optparse"
+require_relative "../lib/flac_to_mp3"
+
+def parse_options
+  options = {
+    path: nil,
+    dry_run: false
+  }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = "Usage: bin/flac-to-mp3 [options]"
+
+    opts.on("-p", "--path PATH", "Music directory path (overrides FLAC_MUSIC_PATH env var)") do |p|
+      options[:path] = p
+    end
+
+    opts.on("-n", "--dry-run", "Preview mode: show what would happen without making changes") do
+      options[:dry_run] = true
+    end
+
+    opts.on("-h", "--help", "Show this help message") do
+      puts opts
+      exit 0
+    end
+  end
+
+  parser.parse!
+
+  # Resolve path: CLI arg > ENV var > default
+  options[:path] ||= ENV.fetch("FLAC_MUSIC_PATH", nil)
+  options[:path] ||= "/mnt/c/Users/alex/PLEX MEDIA/MUSIC/"
+
+  options
+end
+
+def validate_environment(path)
+  # Check if ffmpeg is available
+  unless system("which ffmpeg > /dev/null 2>&1")
+    abort "[ERROR] ffmpeg is not installed or not on PATH. Please install ffmpeg and try again."
+  end
+
+  # Check if the target path exists and is a directory
+  expanded = File.expand_path(path)
+  unless Dir.exist?(expanded)
+    abort "[ERROR] Directory not found: #{expanded}"
+  end
+end
+
+# -- MAIN --------------------------------------------------------------------
+
+options = parse_options
+validate_environment(options[:path])
+
+converter = FlacToMp3::Converter.new(
+  path: options[:path],
+  dry_run: options[:dry_run]
+)
+logger = FlacToMp3::DualLogger.new
+
+mode_label = options[:dry_run] ? "DRY-RUN" : "LIVE"
+logger.log("=" * 50)
+logger.log("FLAC-to-MP3 Converter — #{mode_label} MODE")
+logger.log("=" * 50)
+logger.log("Target path : #{File.expand_path(options[:path])}")
+logger.log("FFmpeg path : #{`which ffmpeg`.strip}")
+logger.log("Log file    : #{logger.log_path}")
+logger.log("=" * 50)
+
+start_time = Time.now
+flac_files = converter.find_flac_files
+
+logger.log("Found #{flac_files.length} FLAC file(s) to process.")
+logger.log("")
+
+if flac_files.empty?
+  logger.log("Nothing to do. Exiting.")
+  logger.close
+  exit 0
+end
+
+flac_files.each_with_index do |flac_path, idx|
+  progress = "[#{idx + 1}/#{flac_files.length}]"
+  logger.log("#{progress} Processing: #{File.basename(flac_path)}")
+
+  if converter.convert_file(flac_path, logger: logger)
+    converter.record_space(flac_path)
+    converter.remove_original(flac_path, logger: logger) unless options[:dry_run]
+  end
+
+  logger.log("")
+end
+
+elapsed = (Time.now - start_time).to_i
+
+logger.log_summary(
+  stats: converter.stats,
+  elapsed: elapsed,
+  logger: logger
+)
+
+logger.log("Full log saved to: #{logger.log_path}")
+logger.close
