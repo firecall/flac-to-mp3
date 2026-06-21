@@ -1,0 +1,11 @@
+{
+  "includeCoAuthoredBy": true,
+  "permissions": {
+    "allow": [
+      "Bash(./bin/flac-to-mp3 *)",
+      "Bash(bundle *)",
+      "Bash(gh *)",
+      "Bash(git *)"
+    ]
+  }
+}
