@@ -33,7 +33,7 @@ export FLAC_MUSIC_PATH="/path/to/music"
 bin/flac-to-mp3
 ```
 
-Or copy `.env.example` to `.env` and source it before running.
+Or copy `.env.example` to `.env` — the script loads it automatically.
 
 No default path is set — either `--path` or `FLAC_MUSIC_PATH` must be provided.
 
