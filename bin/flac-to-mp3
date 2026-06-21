@@ -10,6 +10,7 @@
 #   bin/flac-to-mp3                           # uses FLAC_MUSIC_PATH env var or default
 #   bin/flac-to-mp3 --path /my/music          # explicit path
 #   bin/flac-to-mp3 --path /my/music --dry-run  # preview only, no changes
+#   bin/flac-to-mp3 --jobs 8                  # run 8 parallel ffmpeg workers
 #   bin/flac-to-mp3 --help                    # show help
 #
 # Environment:
@@ -34,6 +35,7 @@ def configure_opts(opts, options)
   opts.banner = 'Usage: bin/flac-to-mp3 [options]'
   opts.on('-p', '--path PATH', 'Music directory path (overrides FLAC_MUSIC_PATH env var)') { |p| options[:path] = p }
   opts.on('-n', '--dry-run', 'Preview mode: show what would happen without making changes') { options[:dry_run] = true }
+  opts.on('-j', '--jobs N', Integer, 'Parallel ffmpeg workers (default: 4)') { |n| options[:jobs] = n }
   opts.on('-h', '--help', 'Show this help message') do
     puts opts
     exit 0
@@ -50,22 +52,26 @@ def resolve_path(options)
 end
 
 def parse_options
-  options = { path: nil, dry_run: false }
+  options = { path: nil, dry_run: false, jobs: 4 }
   OptionParser.new { |opts| configure_opts(opts, options) }.parse!
   resolve_path(options)
 end
 
+def validate_ffmpeg(path)
+  return if system('which ffmpeg > /dev/null 2>&1')
+  return if path.match?(%r{^/mnt/[a-z]/}i) && system('where.exe ffmpeg.exe > /dev/null 2>&1')
+
+  abort '[ERROR] ffmpeg not found. Install ffmpeg, or for Windows paths ensure ffmpeg.exe is on the Windows PATH.'
+end
+
 def validate_environment(path)
-  # Check if ffmpeg is available
-  unless system('which ffmpeg > /dev/null 2>&1')
-    abort '[ERROR] ffmpeg is not installed or not on PATH. Please install ffmpeg and try again.'
-  end
-
-  # Check if the target path exists and is a directory
+  validate_ffmpeg(path)
   expanded = File.expand_path(path)
-  return if Dir.exist?(expanded)
+  abort "[ERROR] Directory not found: #{expanded}" unless Dir.exist?(expanded)
+end
 
-  abort "[ERROR] Directory not found: #{expanded}"
+def ffmpeg_label(converter)
+  converter.windows_ffmpeg? ? 'ffmpeg.exe (Windows native)' : `which ffmpeg`.strip
 end
 
 # -- MAIN --------------------------------------------------------------------
@@ -84,7 +90,8 @@ logger.log('=' * 50)
 logger.log("FLAC-to-MP3 Converter — #{mode_label} MODE")
 logger.log('=' * 50)
 logger.log("Target path : #{File.expand_path(options[:path])}")
-logger.log("FFmpeg path : #{`which ffmpeg`.strip}")
+logger.log("FFmpeg      : #{ffmpeg_label(converter)}")
+logger.log("Jobs        : #{options[:jobs]}")
 logger.log("Log file    : #{logger.log_path}")
 logger.log('=' * 50)
 
@@ -100,22 +107,32 @@ if flac_files.empty?
   exit 0
 end
 
-flac_files.each_with_index do |flac_path, idx|
-  progress = "[#{idx + 1}/#{flac_files.length}]"
-  logger.log("#{progress} Processing: #{File.basename(flac_path)}")
+total = flac_files.length
+queue = Queue.new
+flac_files.each { |f| queue << f }
+options[:jobs].times { queue << nil }
 
-  begin
-    if converter.convert_file?(flac_path, logger: logger)
-      converter.record_space(flac_path)
-      converter.remove_original(flac_path, logger: logger) unless options[:dry_run]
+idx_mutex = Mutex.new
+current_idx = 0
+
+workers = Array.new(options[:jobs]) do
+  Thread.new do
+    while (flac_path = queue.pop)
+      idx = idx_mutex.synchronize { current_idx += 1 }
+      logger.log("[#{idx}/#{total}] Processing: #{File.basename(flac_path)}")
+      begin
+        if converter.convert_file?(flac_path, logger: logger)
+          converter.record_space(flac_path)
+          converter.remove_original(flac_path, logger: logger) unless options[:dry_run]
+        end
+      rescue StandardError => e
+        converter.log_error("[ERROR] #{File.basename(flac_path)}: #{e.message}", logger: logger)
+      end
+      logger.log('')
     end
-  rescue StandardError => e
-    logger.log("[ERROR] #{File.basename(flac_path)}: #{e.message}")
-    converter.stats[:failed] += 1
   end
-
-  logger.log('')
 end
+workers.each(&:join)
 
 converter.rename_flac_directories(logger: logger)
 
