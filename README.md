@@ -56,6 +56,9 @@ bin/flac-to-mp3 --path "/path/to/music"
 bin/flac-to-mp3 --dry-run
 bin/flac-to-mp3 -n --path /my/music
 
+# Run 8 parallel ffmpeg workers (default: 4)
+bin/flac-to-mp3 --jobs 8
+
 # Show help
 bin/flac-to-mp3 --help
 ```
@@ -80,12 +83,29 @@ No default path is set — either `--path` or `FLAC_MUSIC_PATH` must be provided
 - Strips "FLAC" / "flac" substrings from filenames
 - Removes original FLAC files after successful conversion
 - Skips files where the MP3 already exists
+- Renames directories to remove FLAC-related tags (see below)
 - Logs progress to both terminal and a timestamped log file
 - Prints a summary with files processed, failures, time elapsed, and disk space saved
 
+## Directory Renaming
+
+After conversion, the script renames any directories whose names contain FLAC-related noise. It strips:
+
+| Pattern | Example input | Result |
+|---------|--------------|--------|
+| Bracket tags | `Artist - Album [FLAC]` | `Artist - Album` |
+| Bracket tags with bitrate/depth | `Artist - Album [Flac 16-44]` | `Artist - Album` |
+| Any bracket tag | `Artist - Album [PMEDIA]` | `Artist - Album` |
+| Bare "FLAC" substring | `My FLAC Collection` | `My Collection` |
+| Bitrate tokens | `Artist - Album 320kbps` | `Artist - Album` |
+| Bitrate with underscore | `Artist - Album 320_kbps` | `Artist - Album` |
+| Emoji (standalone or attached) | `Artist - Album ⭐️` / `Beats⭐` | `Artist - Album` |
+
+Nested directories are renamed deepest-first so parent renames don't invalidate child paths. Directories that would collide with an existing name are skipped with a warning.
+
 ## Dry-Run Mode
 
-`--dry-run` or `-n` shows exactly what would happen without converting or deleting anything: which files would be converted, renamed, and removed.
+`--dry-run` or `-n` shows exactly what would happen without converting, deleting, or renaming anything: which files would be converted and which directories would be renamed.
 
 ---
 
