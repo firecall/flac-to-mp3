@@ -14,6 +14,8 @@ module FlacToMp3
       @path = File.expand_path(path)
       @dry_run = dry_run
       @stats = { processed: 0, failed: 0, skipped: 0, space_saved_bytes: 0, dirs_renamed: 0 }
+      @mutex = Mutex.new
+      @use_windows_ffmpeg = detect_windows_ffmpeg
     end
 
     def find_flac_files
@@ -70,8 +72,30 @@ module FlacToMp3
       mp3_path = new_mp3_path(flac_path)
       mp3_size = File.exist?(mp3_path) ? File.size(mp3_path) : 0
       saved = flac_size - mp3_size
-      @stats[:space_saved_bytes] += saved if saved.positive?
+      @mutex.synchronize { @stats[:space_saved_bytes] += saved } if saved.positive?
       saved
+    end
+
+    # True when Windows-native ffmpeg.exe will be used for conversions.
+    def windows_ffmpeg?
+      @use_windows_ffmpeg
+    end
+
+    # True when path is on the Windows filesystem via WSL (/mnt/c/, /mnt/d/, etc.).
+    def windows_path?(path)
+      path.match?(%r{^/mnt/[a-z]/}i)
+    end
+
+    # Convert a WSL path like /mnt/c/Users/foo to C:\Users\foo.
+    def to_windows_path(path)
+      path
+        .sub(%r{^/mnt/([a-z])/}i) { "#{Regexp.last_match(1).upcase}:\\" }
+        .gsub('/', '\\')
+    end
+
+    def log_error(message, logger: nil)
+      logger&.log(message)
+      @mutex.synchronize { @stats[:failed] += 1 }
     end
 
     private
@@ -79,13 +103,13 @@ module FlacToMp3
     def rename_directory(dir_path, new_path, logger)
       if dry_run
         logger&.log("[DRY-RUN] Would rename dir: #{File.basename(dir_path)} -> #{File.basename(new_path)}")
-        @stats[:dirs_renamed] += 1
+        @mutex.synchronize { @stats[:dirs_renamed] += 1 }
       elsif Dir.exist?(new_path)
         logger&.log("[WARN] Skipping rename: #{File.basename(new_path)} already exists")
       else
         FileUtils.mv(dir_path, new_path)
         logger&.log("[DIR] Renamed: #{File.basename(dir_path)} -> #{File.basename(new_path)}")
-        @stats[:dirs_renamed] += 1
+        @mutex.synchronize { @stats[:dirs_renamed] += 1 }
       end
     end
 
@@ -100,7 +124,7 @@ module FlacToMp3
       result = result.gsub(/\s*\([^)]*flac[^)]*\)/i, '') # (FLAC) parens
       result = result.gsub(/flac/i, '') # bare flac
       result = result.gsub(/\s*\b\d+_?kbps\b/i, '') # 320kbps, 320_kbps
-      result = result.gsub(/\s*\w*[\u{1F300}-\u{1FFFF}\u{2600}-\u{2BFF}\uFE0F]+\w*/, '') # Beats⭐, ⭐️
+      result = result.gsub(/\s*\w*[\u{1F300}-\u{1FFFF}\u{2600}-\u{2BFF}️]+\w*/, '') # Beats⭐, ⭐️
       result = result.gsub(/\s{2,}/, ' ').strip
       result.empty? ? 'music' : result
     end
@@ -116,31 +140,42 @@ module FlacToMp3
 
     def skip_existing?(mp3_path, logger)
       logger&.log("[SKIP] Output already exists: #{File.basename(mp3_path)}")
-      @stats[:skipped] += 1
+      @mutex.synchronize { @stats[:skipped] += 1 }
       true
     end
 
     def dry_run_convert?(flac_path, mp3_path, logger)
       logger&.log("[DRY-RUN] Would convert: #{File.basename(flac_path)} -> #{File.basename(mp3_path)}")
-      @stats[:processed] += 1
+      @mutex.synchronize { @stats[:processed] += 1 }
       true
     end
 
     def ffmpeg_command(flac_path, mp3_path)
-      ['ffmpeg', '-y', '-i', flac_path, '-codec:a', 'libmp3lame', '-qscale:a', '2',
-       '-map_metadata', '0', '-id3v2_version', '3', mp3_path]
+      exe = @use_windows_ffmpeg ? 'ffmpeg.exe' : 'ffmpeg'
+      src = @use_windows_ffmpeg ? to_windows_path(flac_path) : flac_path
+      dst = @use_windows_ffmpeg ? to_windows_path(mp3_path) : mp3_path
+      [exe, '-y', '-i', src, '-codec:a', 'libmp3lame', '-qscale:a', '2',
+       '-map_metadata', '0', '-id3v2_version', '3', dst]
     end
 
     def run_ffmpeg?(flac_path, mp3_path, logger)
       if system(*ffmpeg_command(flac_path, mp3_path), err: File::NULL)
         logger&.log("[OK] Converted: #{File.basename(flac_path)} -> #{File.basename(mp3_path)}")
-        @stats[:processed] += 1
+        @mutex.synchronize { @stats[:processed] += 1 }
         true
       else
         logger&.log("[FAIL] ffmpeg error on: #{File.basename(flac_path)}")
-        @stats[:failed] += 1
+        @mutex.synchronize { @stats[:failed] += 1 }
         false
       end
+    end
+
+    def detect_windows_ffmpeg
+      return false unless windows_path?(@path)
+
+      system('where.exe ffmpeg.exe > /dev/null 2>&1') == true
+    rescue StandardError
+      false
     end
   end
 
@@ -152,13 +187,16 @@ module FlacToMp3
       timestamp = Time.now.strftime('%Y-%m-%d-%H%M%S')
       @log_path = File.join(log_dir, "flac-to-mp3-#{timestamp}.log")
       @file = File.open(@log_path, 'a')
+      @mutex = Mutex.new
     end
 
     def log(message)
       line = "[#{Time.now.strftime('%H:%M:%S')}] #{message}"
-      puts line
-      @file.puts(line)
-      @file.flush
+      @mutex.synchronize do
+        puts line
+        @file.puts(line)
+        @file.flush
+      end
     end
 
     def close
