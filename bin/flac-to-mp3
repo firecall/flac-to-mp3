@@ -96,7 +96,31 @@ logger.log("Log file    : #{logger.log_path}")
 logger.log('=' * 50)
 
 start_time = Time.now
-flac_files = converter.find_flac_files
+logger.log('Scanning for FLAC files...')
+
+found_count = 0
+if $stdout.tty?
+  scanning = true
+  spinner_thread = Thread.new do
+    frames = ['|', '/', '-', '\\']
+    i = 0
+    while scanning
+      print "\r  #{frames[i % 4]}  #{found_count} found"
+      $stdout.flush
+      sleep 0.1
+      i += 1
+    end
+    print "\r#{' ' * 25}\r"
+    $stdout.flush
+  end
+end
+
+flac_files = converter.find_flac_files { |n| found_count = n }
+
+if $stdout.tty?
+  scanning = false
+  spinner_thread.join
+end
 
 logger.log("Found #{flac_files.length} FLAC file(s) to process.")
 logger.log('')

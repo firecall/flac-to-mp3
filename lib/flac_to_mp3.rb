@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require 'find'
 require 'time'
 
 module FlacToMp3
@@ -19,7 +20,14 @@ module FlacToMp3
     end
 
     def find_flac_files
-      Dir.glob("#{@path}/**/*").select { |f| File.file?(f) && f.end_with?('.flac', '.FLAC', '.Flac') }
+      files = []
+      Find.find(@path) do |f|
+        next unless File.file?(f) && f.match?(/\.flac$/i)
+
+        files << f
+        yield files.length if block_given?
+      end
+      files
     end
 
     # Derive the target MP3 path:
