@@ -50,3 +50,7 @@ No default path is set — either `--path` or `FLAC_MUSIC_PATH` must be provided
 ## Dry-Run Mode
 
 `--dry-run` or `-n` shows exactly what would happen without converting or deleting anything: which files would be converted, renamed, and removed.
+
+---
+
+Built with [Claude Code](https://claude.ai/code).
