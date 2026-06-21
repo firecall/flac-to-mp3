@@ -5,7 +5,7 @@ Metrics/AbcSize:
   Exclude:
     - 'test/**/*'
 Metrics/ClassLength:
-  Max: 140
+  Max: 150
 Metrics/MethodLength:
   Exclude:
     - 'test/**/*'

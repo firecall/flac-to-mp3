@@ -158,7 +158,7 @@ workers = Array.new(options[:jobs]) do
 end
 workers.each(&:join)
 
-converter.rename_flac_directories(logger: logger)
+converter.rename_directories(logger: logger)
 
 elapsed = (Time.now - start_time).to_i
 

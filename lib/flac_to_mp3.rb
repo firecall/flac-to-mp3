@@ -64,8 +64,8 @@ module FlacToMp3
       File.join(File.dirname(dir_path), clean_dirname(File.basename(dir_path)))
     end
 
-    def rename_flac_directories(logger: nil)
-      find_flac_directories.each do |dir_path|
+    def rename_directories(logger: nil)
+      find_all_directories.each do |dir_path|
         new_path = new_dir_path(dir_path)
         next if new_path == dir_path
 
@@ -121,17 +121,20 @@ module FlacToMp3
       end
     end
 
-    def find_flac_directories
+    def find_all_directories
       Dir.glob("#{@path}/**/*")
-         .select { |f| File.directory?(f) && File.basename(f).match?(/flac/i) }
+         .select { |f| File.directory?(f) }
          .sort_by { |d| -d.count('/') }
     end
 
     def clean_dirname(name)
-      result = name.gsub(/\s*\[[^\]]*\]/i, '') # [PMEDIA], [FLAC], [Flac 16-44], [Mp3~320Kbps]
+      result = name.gsub(/\s*\[[^\]]*\](?:[-_]\w+)*/i, '') # [PMEDIA], [FLAC]-tag, [24Bit-44.1kHz]
       result = result.gsub(/\s*\([^)]*flac[^)]*\)/i, '') # (FLAC) parens
-      result = result.gsub(/flac/i, '') # bare flac
+      result = result.gsub(/flac/i, '') # bare FLAC
+      result = result.gsub(/\s*\(\d+_?kbps\)/i, '') # (320kbps), (320_kbps)
       result = result.gsub(/\s*\b\d+_?kbps\b/i, '') # 320kbps, 320_kbps
+      result = result.gsub(/\s*\b\d{1,2}[-x]\d{2,3}(?:\.\d+)?\b/i, '') # 24-48, 16-44, 24x96
+      result = result.gsub(/\s+\b(?:88\.2|88|96|176\.4|176|192|384)\b\s*$/, '') # trailing sample rates
       result = result.gsub(/\s*\w*[\u{1F300}-\u{1FFFF}\u{2600}-\u{2BFF}️]+\w*/, '') # Beats⭐, ⭐️
       result = result.gsub(/\s{2,}/, ' ').strip
       result.empty? ? 'music' : result
