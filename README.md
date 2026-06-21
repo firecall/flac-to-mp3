@@ -7,6 +7,42 @@ Ruby script that recursively converts FLAC audio files to MP3 using FFmpeg.
 - Ruby 4.0+
 - FFmpeg (with libmp3lame)
 
+### Installing FFmpeg
+
+**Linux / WSL:**
+```bash
+sudo apt install ffmpeg
+```
+
+**Windows (recommended — for WSL users targeting a Windows drive):**
+
+Install via winget in PowerShell or Command Prompt:
+```powershell
+winget install Gyan.FFmpeg
+```
+
+Then open a new WSL terminal so the updated Windows PATH is inherited.
+
+### FFmpeg selection under WSL
+
+When the target path is on a Windows drive (`/mnt/c/`, `/mnt/d/`, etc.), the script automatically picks the faster option:
+
+| Condition | FFmpeg used |
+|-----------|-------------|
+| `ffmpeg.exe` found on Windows PATH | `ffmpeg.exe` (Windows native) |
+| Only Linux `ffmpeg` available | `ffmpeg` (Linux, via WSL) |
+
+Using `ffmpeg.exe` is significantly faster for Windows paths because it reads and writes NTFS directly. The Linux binary has to cross the WSL filesystem boundary on every read and write, which is slow for large libraries.
+
+The active FFmpeg is shown in the run header:
+```
+FFmpeg      : ffmpeg.exe (Windows native)
+```
+or
+```
+FFmpeg      : /usr/bin/ffmpeg
+```
+
 ## Usage
 
 ```bash
