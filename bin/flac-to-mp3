@@ -104,7 +104,7 @@ flac_files.each_with_index do |flac_path, idx|
   progress = "[#{idx + 1}/#{flac_files.length}]"
   logger.log("#{progress} Processing: #{File.basename(flac_path)}")
 
-  if converter.convert_file(flac_path, logger: logger)
+  if converter.convert_file?(flac_path, logger: logger)
     converter.record_space(flac_path)
     converter.remove_original(flac_path, logger: logger) unless options[:dry_run]
   end

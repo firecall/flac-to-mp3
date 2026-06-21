@@ -99,7 +99,7 @@ class ConverterTest < Minitest::Test
     setup_temp_dir("track.flac" => "")
 
     conv = FlacToMp3::Converter.new(path: @tmpdir, dry_run: true)
-    result = conv.convert_file(File.join(@tmpdir, "track.flac"))
+    result = conv.convert_file?(File.join(@tmpdir, "track.flac"))
 
     assert result
     assert_equal 1, conv.stats[:processed]
@@ -114,7 +114,7 @@ class ConverterTest < Minitest::Test
     setup_temp_dir("track.flac" => "", "track.mp3" => "existing mp3")
 
     conv = FlacToMp3::Converter.new(path: @tmpdir)
-    result = conv.convert_file(File.join(@tmpdir, "track.flac"))
+    result = conv.convert_file?(File.join(@tmpdir, "track.flac"))
 
     assert result
     assert_equal 1, conv.stats[:skipped]
