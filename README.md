@@ -83,22 +83,29 @@ No default path is set — either `--path` or `FLAC_MUSIC_PATH` must be provided
 - Strips "FLAC" / "flac" substrings from filenames
 - Removes original FLAC files after successful conversion
 - Skips files where the MP3 already exists
-- Renames directories to remove FLAC-related tags (see below)
+- Renames directories to remove format tags and encoding noise (see below)
 - Logs progress to both terminal and a timestamped log file
 - Prints a summary with files processed, failures, time elapsed, and disk space saved
 
 ## Directory Renaming
 
-After conversion, the script renames any directories whose names contain FLAC-related noise. It strips:
+After conversion, the script renames **all** directories whose names contain format tags or encoding noise — not just FLAC-tagged ones. It strips:
 
 | Pattern | Example input | Result |
 |---------|--------------|--------|
-| Bracket tags | `Artist - Album [FLAC]` | `Artist - Album` |
-| Bracket tags with bitrate/depth | `Artist - Album [Flac 16-44]` | `Artist - Album` |
-| Any bracket tag | `Artist - Album [PMEDIA]` | `Artist - Album` |
+| Any bracket tag | `Artist - Album [FLAC]` | `Artist - Album` |
+| Bracket tag with depth/rate | `Artist - Album [Flac 16-44]` | `Artist - Album` |
+| Bracket tag with bit depth | `Artist - Album [24Bit-44.1kHz]` | `Artist - Album` |
+| Bracket tag + uploader handle | `Artist - Album [FLAC]-Sc4r3cr0w` | `Artist - Album` |
+| Source/format tag | `Artist - Album [EAC-FLAC]` | `Artist - Album` |
+| Tagger/distributor tag | `Artist - Album [PMEDIA]` | `Artist - Album` |
+| Ripper tag | `Artist - Album [Hunter]` | `Artist - Album` |
+| Parenthesised FLAC | `Artist - Album (FLAC)` | `Artist - Album` |
 | Bare "FLAC" substring | `My FLAC Collection` | `My Collection` |
-| Bitrate tokens | `Artist - Album 320kbps` | `Artist - Album` |
-| Bitrate with underscore | `Artist - Album 320_kbps` | `Artist - Album` |
+| Bitrate (kbps) | `Artist - Album 320kbps` / `320_kbps` | `Artist - Album` |
+| Parenthesised bitrate | `Artist - Album (320kbps)` | `Artist - Album` |
+| Bit-depth/sample-rate pair | `Artist - Album flac 24-48` | `Artist - Album` |
+| Trailing sample rate | `Artist - Album [FLAC] 88` | `Artist - Album` |
 | Emoji (standalone or attached) | `Artist - Album ⭐️` / `Beats⭐` | `Artist - Album` |
 
 Nested directories are renamed deepest-first so parent renames don't invalidate child paths. Directories that would collide with an existing name are skipped with a warning.
