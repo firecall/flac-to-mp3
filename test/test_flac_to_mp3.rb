@@ -197,6 +197,31 @@ class ConverterDirRenameTest < Minitest::Test
     assert_equal '/music/Artist - Normal Album', conv.new_dir_path('/music/Artist - Normal Album')
   end
 
+  def test_new_dir_path_removes_any_bracket_tag
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album [PMEDIA]')
+  end
+
+  def test_new_dir_path_removes_bracket_tag_and_emoji
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album [PMEDIA] ⭐️')
+  end
+
+  def test_new_dir_path_removes_word_plus_emoji
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album Beats⭐')
+  end
+
+  def test_new_dir_path_removes_bitrate_kbps
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album 320kbps')
+  end
+
+  def test_new_dir_path_removes_bitrate_underscore_kbps
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal '/music/Artist - Album', conv.new_dir_path('/music/Artist - Album 320_kbps')
+  end
+
   def test_rename_flac_directories_renames_matching_dirs
     setup_temp_dir(
       'Artist - Album [Flac 16-44]/track.mp3' => '',

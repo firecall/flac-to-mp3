@@ -95,11 +95,12 @@ module FlacToMp3
          .sort_by { |d| -d.count('/') }
     end
 
-    # Remove FLAC bracket expressions (e.g. " [Flac 16-44]", "[FLAC]") then
-    # any remaining "flac" substrings, and collapse leftover whitespace.
     def clean_dirname(name)
-      result = name.gsub(/\s*[\[(][^\])\[]*flac[^\])\[]*[\])]/i, '')
-      result = result.gsub(/flac/i, '')
+      result = name.gsub(/\s*\[[^\]]*\]/i, '') # [PMEDIA], [FLAC], [Flac 16-44], [Mp3~320Kbps]
+      result = result.gsub(/\s*\([^)]*flac[^)]*\)/i, '') # (FLAC) parens
+      result = result.gsub(/flac/i, '') # bare flac
+      result = result.gsub(/\s*\b\d+_?kbps\b/i, '') # 320kbps, 320_kbps
+      result = result.gsub(/\s*\w*[\u{1F300}-\u{1FFFF}\u{2600}-\u{2BFF}\uFE0F]+\w*/, '') # Beats⭐, ⭐️
       result = result.gsub(/\s{2,}/, ' ').strip
       result.empty? ? 'music' : result
     end
