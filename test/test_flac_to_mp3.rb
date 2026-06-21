@@ -280,6 +280,39 @@ class ConverterDirRenameTest < Minitest::Test
   end
 end
 
+class ConverterWindowsPathTest < Minitest::Test
+  def test_windows_path_detects_mnt_c
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert conv.windows_path?('/mnt/c/Users/music/song.flac')
+  end
+
+  def test_windows_path_detects_other_drive
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert conv.windows_path?('/mnt/d/music')
+  end
+
+  def test_windows_path_rejects_linux_path
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    refute conv.windows_path?('/home/user/music/song.flac')
+  end
+
+  def test_to_windows_path_c_drive
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal 'C:\Users\music\song.flac', conv.to_windows_path('/mnt/c/Users/music/song.flac')
+  end
+
+  def test_to_windows_path_uppercase_drive_letter
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    assert_equal 'D:\my music\song.flac', conv.to_windows_path('/mnt/d/my music/song.flac')
+  end
+
+  def test_log_error_increments_failed_stat
+    conv = FlacToMp3::Converter.new(path: '/tmp')
+    conv.log_error('something went wrong')
+    assert_equal 1, conv.stats[:failed]
+  end
+end
+
 class DualLoggerTest < Minitest::Test
   include FlacToMp3::TestHelpers
 
