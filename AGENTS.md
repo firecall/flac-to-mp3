@@ -24,6 +24,11 @@ Entry point: `bin/flac-to-mp3` — CLI with `--path`, `--dry-run`/`-n`, `--help`
 
 No runtime gem dependencies — only Ruby stdlib + the `ffmpeg` system binary.
 
+## System Prerequisites
+
+- `ffmpeg` (with libmp3lame) — required at runtime
+- `watchman` — required by Ruby LSP for file watching (`sudo apt install watchman`)
+
 ## Conventions
 
 - `# frozen_string_literal: true` on all Ruby files
