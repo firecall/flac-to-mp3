@@ -15,65 +15,57 @@
 # Environment:
 #   FLAC_MUSIC_PATH   Default directory to scan
 
-require "optparse"
-require_relative "../lib/flac_to_mp3"
+require 'optparse'
+require_relative '../lib/flac_to_mp3'
 
 # Auto-load .env from the project root if present
-env_file = File.expand_path("../.env", __dir__)
+env_file = File.expand_path('../.env', __dir__)
 if File.exist?(env_file)
   File.foreach(env_file) do |line|
     line = line.strip
-    next if line.empty? || line.start_with?("#")
-    key, value = line.split("=", 2)
+    next if line.empty? || line.start_with?('#')
+
+    key, value = line.split('=', 2)
     ENV[key] ||= value.to_s.delete_prefix('"').delete_suffix('"').delete_prefix("'").delete_suffix("'")
   end
 end
 
-def parse_options
-  options = {
-    path: nil,
-    dry_run: false
-  }
-
-  parser = OptionParser.new do |opts|
-    opts.banner = "Usage: bin/flac-to-mp3 [options]"
-
-    opts.on("-p", "--path PATH", "Music directory path (overrides FLAC_MUSIC_PATH env var)") do |p|
-      options[:path] = p
-    end
-
-    opts.on("-n", "--dry-run", "Preview mode: show what would happen without making changes") do
-      options[:dry_run] = true
-    end
-
-    opts.on("-h", "--help", "Show this help message") do
-      puts opts
-      exit 0
-    end
+def configure_opts(opts, options)
+  opts.banner = 'Usage: bin/flac-to-mp3 [options]'
+  opts.on('-p', '--path PATH', 'Music directory path (overrides FLAC_MUSIC_PATH env var)') { |p| options[:path] = p }
+  opts.on('-n', '--dry-run', 'Preview mode: show what would happen without making changes') { options[:dry_run] = true }
+  opts.on('-h', '--help', 'Show this help message') do
+    puts opts
+    exit 0
   end
+end
 
-  parser.parse!
-
-  # Resolve path: CLI arg > ENV var
-  options[:path] ||= ENV.fetch("FLAC_MUSIC_PATH", nil)
+def resolve_path(options)
+  options[:path] ||= ENV.fetch('FLAC_MUSIC_PATH', nil)
   if options[:path].nil?
-    abort "[ERROR] No path specified. Use --path /your/music or set the FLAC_MUSIC_PATH environment variable."
+    abort '[ERROR] No path specified. Use --path /your/music or set the FLAC_MUSIC_PATH environment variable.'
   end
 
   options
 end
 
+def parse_options
+  options = { path: nil, dry_run: false }
+  OptionParser.new { |opts| configure_opts(opts, options) }.parse!
+  resolve_path(options)
+end
+
 def validate_environment(path)
   # Check if ffmpeg is available
-  unless system("which ffmpeg > /dev/null 2>&1")
-    abort "[ERROR] ffmpeg is not installed or not on PATH. Please install ffmpeg and try again."
+  unless system('which ffmpeg > /dev/null 2>&1')
+    abort '[ERROR] ffmpeg is not installed or not on PATH. Please install ffmpeg and try again.'
   end
 
   # Check if the target path exists and is a directory
   expanded = File.expand_path(path)
-  unless Dir.exist?(expanded)
-    abort "[ERROR] Directory not found: #{expanded}"
-  end
+  return if Dir.exist?(expanded)
+
+  abort "[ERROR] Directory not found: #{expanded}"
 end
 
 # -- MAIN --------------------------------------------------------------------
@@ -87,23 +79,23 @@ converter = FlacToMp3::Converter.new(
 )
 logger = FlacToMp3::DualLogger.new
 
-mode_label = options[:dry_run] ? "DRY-RUN" : "LIVE"
-logger.log("=" * 50)
+mode_label = options[:dry_run] ? 'DRY-RUN' : 'LIVE'
+logger.log('=' * 50)
 logger.log("FLAC-to-MP3 Converter — #{mode_label} MODE")
-logger.log("=" * 50)
+logger.log('=' * 50)
 logger.log("Target path : #{File.expand_path(options[:path])}")
 logger.log("FFmpeg path : #{`which ffmpeg`.strip}")
 logger.log("Log file    : #{logger.log_path}")
-logger.log("=" * 50)
+logger.log('=' * 50)
 
 start_time = Time.now
 flac_files = converter.find_flac_files
 
 logger.log("Found #{flac_files.length} FLAC file(s) to process.")
-logger.log("")
+logger.log('')
 
 if flac_files.empty?
-  logger.log("Nothing to do. Exiting.")
+  logger.log('Nothing to do. Exiting.')
   logger.close
   exit 0
 end
@@ -117,7 +109,7 @@ flac_files.each_with_index do |flac_path, idx|
     converter.remove_original(flac_path, logger: logger) unless options[:dry_run]
   end
 
-  logger.log("")
+  logger.log('')
 end
 
 elapsed = (Time.now - start_time).to_i
