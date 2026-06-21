@@ -13,7 +13,7 @@
 #   bin/flac-to-mp3 --help                    # show help
 #
 # Environment:
-#   FLAC_MUSIC_PATH   Default directory to scan (falls back to built-in default)
+#   FLAC_MUSIC_PATH   Default directory to scan
 
 require "optparse"
 require_relative "../lib/flac_to_mp3"
@@ -43,9 +43,11 @@ def parse_options
 
   parser.parse!
 
-  # Resolve path: CLI arg > ENV var > default
+  # Resolve path: CLI arg > ENV var
   options[:path] ||= ENV.fetch("FLAC_MUSIC_PATH", nil)
-  options[:path] ||= "/mnt/c/Users/alex/PLEX MEDIA/MUSIC/"
+  if options[:path].nil?
+    abort "[ERROR] No path specified. Use --path /your/music or set the FLAC_MUSIC_PATH environment variable."
+  end
 
   options
 end

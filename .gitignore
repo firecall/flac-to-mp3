@@ -1,3 +1,13 @@
 .env
 *.log
 .ruby-lsp/
+.claude/
+*.gem
+*.rbc
+/pkg/
+/vendor/bundle/
+coverage/
+.DS_Store
+*.swp
+*.swo
+.idea/

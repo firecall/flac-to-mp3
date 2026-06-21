@@ -14,7 +14,7 @@ Ruby script that recursively converts FLAC audio files to MP3 using FFmpeg.
 bin/flac-to-mp3
 
 # Specify a custom path
-bin/flac-to-mp3 --path "/mnt/c/Users/alex/PLEX MEDIA/MUSIC/"
+bin/flac-to-mp3 --path "/path/to/music"
 
 # Dry-run mode — preview only, no changes
 bin/flac-to-mp3 --dry-run
@@ -29,13 +29,13 @@ bin/flac-to-mp3 --help
 Set the `FLAC_MUSIC_PATH` environment variable to avoid passing `--path` every time:
 
 ```bash
-export FLAC_MUSIC_PATH="/mnt/c/Users/alex/PLEX MEDIA/MUSIC/"
+export FLAC_MUSIC_PATH="/path/to/music"
 bin/flac-to-mp3
 ```
 
 Or copy `.env.example` to `.env` and source it before running.
 
-Default path: `/mnt/c/Users/alex/PLEX MEDIA/MUSIC/`
+No default path is set — either `--path` or `FLAC_MUSIC_PATH` must be provided.
 
 ## What It Does
 
