@@ -13,10 +13,9 @@ module FlacToMp3
     def initialize(path:, dry_run: false)
       @path = File.expand_path(path)
       @dry_run = dry_run
-      @stats = { processed: 0, failed: 0, skipped: 0, space_saved_bytes: 0 }
+      @stats = { processed: 0, failed: 0, skipped: 0, space_saved_bytes: 0, dirs_renamed: 0 }
     end
 
-    # Recursively find all .flac files (case-insensitive) under :path
     def find_flac_files
       Dir.glob("#{@path}/**/*").select { |f| File.file?(f) && f.end_with?('.flac', '.FLAC', '.Flac') }
     end
@@ -51,7 +50,21 @@ module FlacToMp3
       logger&.log("[DEL] Removed: #{File.basename(flac_path)}")
     end
 
-    # Calculate disk space difference for a single file pair
+    def new_dir_path(dir_path)
+      File.join(File.dirname(dir_path), clean_dirname(File.basename(dir_path)))
+    end
+
+    def rename_flac_directories(logger: nil)
+      find_flac_directories.each do |dir_path|
+        new_path = new_dir_path(dir_path)
+        next if new_path == dir_path
+
+        rename_directory(dir_path, new_path, logger)
+      rescue StandardError => e
+        logger&.log("[ERROR] Renaming #{File.basename(dir_path)}: #{e.message}")
+      end
+    end
+
     def record_space(flac_path)
       flac_size = File.size(flac_path)
       mp3_path = new_mp3_path(flac_path)
@@ -62,6 +75,34 @@ module FlacToMp3
     end
 
     private
+
+    def rename_directory(dir_path, new_path, logger)
+      if dry_run
+        logger&.log("[DRY-RUN] Would rename dir: #{File.basename(dir_path)} -> #{File.basename(new_path)}")
+        @stats[:dirs_renamed] += 1
+      elsif Dir.exist?(new_path)
+        logger&.log("[WARN] Skipping rename: #{File.basename(new_path)} already exists")
+      else
+        FileUtils.mv(dir_path, new_path)
+        logger&.log("[DIR] Renamed: #{File.basename(dir_path)} -> #{File.basename(new_path)}")
+        @stats[:dirs_renamed] += 1
+      end
+    end
+
+    def find_flac_directories
+      Dir.glob("#{@path}/**/*")
+         .select { |f| File.directory?(f) && File.basename(f).match?(/flac/i) }
+         .sort_by { |d| -d.count('/') }
+    end
+
+    # Remove FLAC bracket expressions (e.g. " [Flac 16-44]", "[FLAC]") then
+    # any remaining "flac" substrings, and collapse leftover whitespace.
+    def clean_dirname(name)
+      result = name.gsub(/\s*[\[(][^\])\[]*flac[^\])\[]*[\])]/i, '')
+      result = result.gsub(/flac/i, '')
+      result = result.gsub(/\s{2,}/, ' ').strip
+      result.empty? ? 'music' : result
+    end
 
     # Clean up separator artifacts left by removing the FLAC substring.
     # Does NOT touch separators that were already present in the original.
@@ -147,6 +188,7 @@ module FlacToMp3
       logger.log("  Files failed    : #{stats[:failed]}")
       logger.log("  Files skipped   : #{stats[:skipped]}")
       logger.log("  Total files     : #{total}")
+      logger.log("  Dirs renamed    : #{stats[:dirs_renamed]}")
     end
 
     def format_duration(seconds)

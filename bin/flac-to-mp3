@@ -117,6 +117,8 @@ flac_files.each_with_index do |flac_path, idx|
   logger.log('')
 end
 
+converter.rename_flac_directories(logger: logger)
+
 elapsed = (Time.now - start_time).to_i
 
 logger.log_summary(
