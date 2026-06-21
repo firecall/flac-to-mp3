@@ -10,7 +10,5 @@ ruby '~> 4.0'
 
 group :development do
   gem 'minitest'
-  gem 'rake'
   gem 'rubocop'
-  gem 'sorbet'
 end
