@@ -284,7 +284,7 @@ class ConverterFfmpegCommandTest < Minitest::Test
     cmd = conv.send(:ffmpeg_command, '/media/movie.mp4', '/media/movie.mkv')
 
     assert_includes cmd, 'h264_nvenc'
-    assert_includes cmd, 'p7'
+    assert_includes cmd, 'p4'
     assert_includes cmd, 'vbr_hq'
     assert_includes cmd, 'copy' # audio copy
     # Check that source and dest paths are in the command array
