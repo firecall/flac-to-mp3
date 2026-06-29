@@ -134,14 +134,30 @@ module VideoTranscode
       false
     end
 
-    # Run an ffmpeg command and capture the last 10 lines of stderr to a temp file.
-    # Logs the tail on failure. Returns true on success.
+    # Run an ffmpeg command, tee stderr to terminal (for progress) and a temp
+    # file (for error logging on failure). Returns true on success.
     def run_ffmpeg_with_stderr(cmd, logger, label)
       err_file = Tempfile.new(['video-transcode', '.err'])
       err_path = err_file.path
-      err_file.close # keep file on disk, ffmpeg will overwrite it
+      err_file.close # keep file on disk so we can open it manually
 
-      success = system(*cmd, err: [err_path, 'a'])
+      # Spawn ffmpeg with stderr piped; tee each line to terminal + file
+      status = nil
+      File.open(err_path, 'a') do |fh|
+        IO.popen([*cmd, err: %i[child out]]) do |io|
+          while (line = io.gets)
+            # Print progress lines to terminal in real time
+            $stdout.print line
+            $stdout.flush
+            # Accumulate in file for error debugging
+            fh.write(line)
+            fh.flush
+          end
+        end
+        status = $CHILD_STATUS
+      end
+
+      success = status&.success?
 
       unless success
         err_lines = File.readlines(err_path)
@@ -154,7 +170,7 @@ module VideoTranscode
         logger&.log("[DEBUG] Full #{label} error log: #{err_log}")
       end
 
-      success
+      success || false
     ensure
       File.delete(err_path) if err_path && File.exist?(err_path)
     end
