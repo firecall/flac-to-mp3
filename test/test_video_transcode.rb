@@ -262,7 +262,7 @@ class ConverterStatsTest < Minitest::Test
   def test_stats_initial_values
     conv = VideoTranscode::Converter.new(path: '/tmp')
     expected = { processed: 0, failed: 0, skipped: 0, kept: 0,
-                 renamed: 0, space_saved_bytes: 0 }
+                 renamed: 0, retried: 0, space_saved_bytes: 0 }
     assert_equal expected, conv.stats
   end
 

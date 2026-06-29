@@ -26,7 +26,7 @@ module VideoTranscode
       @path = File.expand_path(path)
       @dry_run = dry_run
       @stats = { processed: 0, failed: 0, skipped: 0, kept: 0,
-                 renamed: 0, space_saved_bytes: 0 }
+                 renamed: 0, retried: 0, space_saved_bytes: 0 }
       @mutex = Mutex.new
       @use_windows_ffmpeg = detect_windows_ffmpeg
     end
@@ -97,14 +97,35 @@ module VideoTranscode
     end
 
     # Run the NVENC ffmpeg transcode. Returns true on success.
+    # Falls back to software x264 if NVENC fails, logging stderr for debugging.
     def run_transcode(source_path, mkv_path, logger)
-      cmd = ffmpeg_command(source_path, mkv_path)
-      if system(*cmd, err: File::NULL)
-        logger&.log("[OK] Transcoded: #{File.basename(source_path)} -> #{File.basename(mkv_path)}")
+      # Try NVENC first
+      cmd = ffmpeg_command(source_path, mkv_path, 'h264_nvenc')
+      stdout, stderr, status = Open3.capture3(*cmd)
+
+      if status.success?
+        logger&.log("[OK] Transcoded (NVENC): #{File.basename(source_path)} -> #{File.basename(mkv_path)}")
+        return true
+      end
+
+      # NVENC failed — log stderr and try software fallback
+      logger&.log("[WARN] NVENC failed, trying software x264: #{File.basename(source_path)}")
+      logger&.log("[DEBUG] NVENC stderr: #{stderr.lines.first(3).map(&:strip).join(' | ')}") unless stderr.strip.empty?
+
+      # Clean up partial NVENC output
+      File.delete(mkv_path) if File.exist?(mkv_path)
+
+      # Fallback: software x264 with equivalent quality settings
+      fallback_cmd = ffmpeg_command(source_path, mkv_path, 'libx264')
+      _stdout2, stderr2, status2 = Open3.capture3(*fallback_cmd)
+
+      if status2.success?
+        @mutex.synchronize { @stats[:retried] += 1 }
+        logger&.log("[OK] Transcoded (x264): #{File.basename(source_path)} -> #{File.basename(mkv_path)}")
         true
       else
-        logger&.log("[FAIL] FFmpeg error on: #{File.basename(source_path)}")
-        # Clean up partial output
+        logger&.log("[FAIL] Both NVENC and x264 failed on: #{File.basename(source_path)}")
+        logger&.log("[DEBUG] x264 stderr: #{stderr2.lines.first(3).map(&:strip).join(' | ')}") unless stderr2.strip.empty?
         File.delete(mkv_path) if File.exist?(mkv_path)
         false
       end
@@ -301,22 +322,30 @@ module VideoTranscode
     end
 
     # Build the FFmpeg command for NVENC 720p transcode with best quality settings.
-    def ffmpeg_command(source_path, mkv_path)
+    def ffmpeg_command(source_path, mkv_path, encoder = 'h264_nvenc')
       exe = @use_windows_ffmpeg ? 'ffmpeg.exe' : 'ffmpeg'
       src = @use_windows_ffmpeg ? to_windows_path(source_path) : source_path
       dst = @use_windows_ffmpeg ? to_windows_path(mkv_path) : mkv_path
 
-      [
-        exe, '-y', '-i', src,
-        '-c:v', 'h264_nvenc',
-        '-preset', 'p7',
-        '-rc', 'vbr_hq',
-        '-cq', '18',
-        '-b:v', '0',
-        '-maxrate', '5000k',
-        '-bufsize', '10000k',
-        '-bf', '4',
-        '-profile:v', 'high',
+      args = [exe, '-y', '-i', src, '-c:v', encoder]
+
+      if encoder == 'h264_nvenc'
+        args += [
+          '-preset', 'p7',
+          '-rc', 'vbr_hq',
+          '-cq', '18',
+          '-b:v', '0',
+          '-maxrate', '5000k',
+          '-bufsize', '10000k',
+          '-bf', '4',
+          '-profile:v', 'high'
+        ]
+      else
+        # Software x264: CRF-based quality, "slow" preset
+        args += ['-preset', 'slow', '-crf', '18', '-profile:v', 'high']
+      end
+
+      args + [
         '-pix_fmt', 'yuv420p',
         '-vf', "scale='min(#{TARGET_WIDTH},iw)':'min(#{TARGET_HEIGHT},ih)':force_original_aspect_ratio=decrease",
         '-c:a', 'copy',
@@ -411,6 +440,7 @@ module VideoTranscode
       logger.log("  Files failed    : #{stats[:failed]}")
       logger.log("  Files skipped   : #{stats[:skipped]}")
       logger.log("  Originals kept  : #{stats[:kept]}")
+      logger.log("  NVENC retries   : #{stats[:retried]}")
       logger.log("  Total files     : #{total}")
     end
 
