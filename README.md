@@ -198,6 +198,40 @@ Or copy `.env.example` to `.env` — the script loads it automatically.
 - Logs progress to both terminal and a timestamped log file
 - Prints a summary with files processed, failed, skipped, kept, time elapsed, and disk space saved
 
+## Filename Rewriting
+
+After a successful transcode, files are automatically renamed to a standardized format. The script attempts Plex-compatible naming first, falling back to in-place tag substitution.
+
+### Plex Format (year detected)
+
+When a 4-digit year (1900–2099) is found in the filename, everything before it becomes the title and everything after is discarded:
+
+| Input | Output |
+|-------|--------|
+| `A.Christmas.Prince.2017.1080p.WEBRip.x264-[YTS.AM].mkv` | `A Christmas Prince (2017) - 720p.mkv` |
+| `The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv` | `The Matrix (1999) - 720p.mkv` |
+| `Dark_Knight.2008.1080p.mkv` | `Dark Knight (2008) - 720p.mkv` |
+
+Dots and underscores in the title are converted to spaces.
+
+### Fallback Tag Replacement (no year detected)
+
+When no year is found, resolution, codec, and group tags are replaced in-place:
+
+| Rule | Example input → output |
+|------|------------------------|
+| `1080p` / `2160p` / `4K` / `UHD` → `720p` | `Movie.2160p.x265.mkv` → `Movie.720p.x264.mkv` |
+| `x265` / `HEVC` / `AVC` / `H.264` → `x264` | `Movie.1080p.HEVC.mkv` → `Movie.720p.x264.mkv` |
+| `[GROUP]` or `-GROUP` stripped | `Movie.1080p.x264-[YTS.AM].mkv` → `Movie.720p.x264.mkv` |
+| No resolution tag → append `720p` | `OldMovie.x264.mkv` → `OldMovie.x264.720p.mkv` |
+| Already `720p` → left unchanged | `Already.720p.x264.mkv` stays as-is |
+
+### Collision Handling
+
+If the target filename already exists, an incrementing suffix is appended (`-1`, `-2`, etc.) to avoid overwriting existing files.
+
+Renaming only happens on **successful** transcodes — skipped or kept originals are never renamed.
+
 ## FFmpeg Encoding Settings
 
 Quality is prioritized over speed. The FFmpeg command uses community best practices for NVENC:
