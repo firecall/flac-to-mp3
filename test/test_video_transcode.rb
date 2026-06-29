@@ -176,7 +176,10 @@ class ConverterSizeComparisonTest < Minitest::Test
     conv.compare_and_replace(source_path, mkv_path, nil)
 
     refute File.exist?(source_path), 'original should be deleted'
-    assert File.exist?(mkv_path), 'transcoded file should be kept'
+    # Transcode is renamed to Plex format "movie (2020) - 720p.mkv" but there's no
+    # year in the source name, so fallback renames "movie.mkv" → "movie.720p.mkv"
+    final_path = File.join(@tmpdir, 'movie.720p.mkv')
+    assert File.exist?(final_path), 'transcoded file should be kept (renamed)'
     assert_equal 800, conv.stats[:space_saved_bytes]
     assert_equal 0, conv.stats[:kept]
   ensure
@@ -259,7 +262,7 @@ class ConverterStatsTest < Minitest::Test
   def test_stats_initial_values
     conv = VideoTranscode::Converter.new(path: '/tmp')
     expected = { processed: 0, failed: 0, skipped: 0, kept: 0,
-                 space_saved_bytes: 0 }
+                 renamed: 0, space_saved_bytes: 0 }
     assert_equal expected, conv.stats
   end
 
@@ -305,6 +308,113 @@ class ConverterFfmpegCommandTest < Minitest::Test
 
     assert_includes cmd, '-map'
     assert_includes cmd, '0'
+  end
+end
+
+class ConverterFilenameRewriteTest < Minitest::Test
+  include VideoTranscode::TestHelpers
+
+  def test_new_filename_plex_format_with_year
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/A.Christmas.Prince.2017.1080p.WEBRip.x264-[YTS.AM].mkv')
+    assert_equal '/media/A Christmas Prince (2017) - 720p.mkv', result
+  end
+
+  def test_new_filename_plex_format_multiple_words
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/The.Matrix.1999.2160p.BluRay.x265-GROUP.mkv')
+    assert_equal '/media/The Matrix (1999) - 720p.mkv', result
+  end
+
+  def test_new_filename_plex_format_underscore_title
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/Dark_Knight.2008.1080p.mkv')
+    assert_equal '/media/Dark Knight (2008) - 720p.mkv', result
+  end
+
+  def test_new_filename_plex_format_preserves_directory
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/subdir/Movie.Name.2020.1080p.mp4')
+    assert_equal '/media/subdir/Movie Name (2020) - 720p.mkv', result
+  end
+
+  def test_new_filename_fallback_1080p_to_720p
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/SomeOldMovie.1080p.mp4')
+    assert_equal '/media/SomeOldMovie.720p.mkv', result
+  end
+
+  def test_new_filename_fallback_2160p_to_720p
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/UHDMovie.2160p.BluRay.x265.mkv')
+    assert_equal '/media/UHDMovie.720p.BluRay.x264.mkv', result
+  end
+
+  def test_new_filename_fallback_4k_to_720p
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/SomeMovie.4K.HEVC.mkv')
+    assert_equal '/media/SomeMovie.720p.x264.mkv', result
+  end
+
+  def test_new_filename_fallback_UHD_to_720p
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/SomeMovie.UHD.Remux.mkv')
+    assert_equal '/media/SomeMovie.720p.Remux.mkv', result
+  end
+
+  def test_new_filename_fallback_x265_to_x264
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/Movie.x265.1080p.mkv')
+    assert_equal '/media/Movie.x264.720p.mkv', result
+  end
+
+  def test_new_filename_fallback_HEVC_to_x264
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/Movie.HEVC.1080p.mkv')
+    assert_equal '/media/Movie.x264.720p.mkv', result
+  end
+
+  def test_new_filename_fallback_AVC_normalized
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/Movie.AVC.1080p.mkv')
+    assert_equal '/media/Movie.x264.720p.mkv', result
+  end
+
+  def test_new_filename_fallback_removes_bracket_group
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/Movie.1080p.x264-[YTS.AM].mkv')
+    assert_equal '/media/Movie.720p.x264.mkv', result
+  end
+
+  def test_new_filename_fallback_appends_720p_when_none
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/OldMovie.x264.mkv')
+    assert_equal '/media/OldMovie.x264.720p.mkv', result
+  end
+
+  def test_new_filename_plex_no_year_falls_back
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.new_filename('/media/NoYearHere.1080p.mkv')
+    assert_equal '/media/NoYearHere.720p.mkv', result
+  end
+
+  def test_new_filename_leading_year_falls_back_to_tags
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    # 2012 at position 0 → empty title → parse_plex_name returns nil → fallback
+    result = conv.new_filename('/media/2012.2009.BluRay.1080p.mkv')
+    assert_equal '/media/2012.2009.BluRay.720p.mkv', result
+  end
+
+  def test_parse_plex_name_returns_nil_for_no_year
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.send(:parse_plex_name, 'MovieNameWithoutYear')
+    assert_nil result
+  end
+
+  def test_replace_tags_leaves_720p_unchanged
+    conv = VideoTranscode::Converter.new(path: '/tmp')
+    result = conv.send(:replace_tags_fallback, 'Already.720p.x264')
+    assert_equal 'Already.720p.x264', result
   end
 end
 

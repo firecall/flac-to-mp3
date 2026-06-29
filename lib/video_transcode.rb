@@ -26,7 +26,7 @@ module VideoTranscode
       @path = File.expand_path(path)
       @dry_run = dry_run
       @stats = { processed: 0, failed: 0, skipped: 0, kept: 0,
-                 space_saved_bytes: 0 }
+                 renamed: 0, space_saved_bytes: 0 }
       @mutex = Mutex.new
       @use_windows_ffmpeg = detect_windows_ffmpeg
     end
@@ -130,10 +130,17 @@ module VideoTranscode
         saved = source_size - tmp_size
         @mutex.synchronize { @stats[:space_saved_bytes] += saved }
         File.delete(source_path)
-        File.rename(tmp_path, source_path)
-        logger&.log("[DEL] Replaced original with smaller transcode: #{File.basename(source_path)} " \
+
+        final_path = unique_path(new_filename(source_path))
+        File.rename(tmp_path, final_path)
+        renamed = final_path != source_path
+        logger&.log("[DEL] Replaced original with smaller transcode: #{File.basename(final_path)} " \
                     "(saved #{format_bytes(saved)})")
-        @mutex.synchronize { @stats[:processed] += 1 }
+        logger&.log("[RNM] Renamed: #{File.basename(source_path)} -> #{File.basename(final_path)}") if renamed
+        @mutex.synchronize do
+          @stats[:processed] += 1
+          @stats[:renamed] += 1 if renamed
+        end
       else
         File.delete(tmp_path)
         logger&.log("[KEEP] Transcoded file not smaller " \
@@ -154,8 +161,16 @@ module VideoTranscode
         saved = source_size - mkv_size
         @mutex.synchronize { @stats[:space_saved_bytes] += saved }
         File.delete(source_path)
+
+        final_path = unique_path(new_filename(source_path))
+        File.rename(mkv_path, final_path)
+        renamed = final_path != mkv_path
         logger&.log("[DEL] Removed original: #{File.basename(source_path)} " \
                     "(saved #{format_bytes(saved)})")
+        logger&.log("[RNM] Renamed: #{File.basename(mkv_path)} -> #{File.basename(final_path)}") if renamed
+        @mutex.synchronize do
+          @stats[:renamed] += 1 if renamed
+        end
         true
       else
         File.delete(mkv_path)
@@ -191,6 +206,19 @@ module VideoTranscode
       @mutex.synchronize { @stats[:failed] += 1 }
     end
 
+    # Derive a Plex-standardized filename for the transcoded output.
+    # Attempts "Title (Year) - 720p.mkv"; falls back to in-place tag substitution.
+    def new_filename(source_path)
+      dir = File.dirname(source_path)
+      base = File.basename(source_path)
+      base_no_ext = base.sub(VIDEO_EXTENSION_REGEX, '')
+
+      plex_name = parse_plex_name(base_no_ext)
+      return File.join(dir, "#{plex_name}.mkv") if plex_name
+
+      File.join(dir, "#{replace_tags_fallback(base_no_ext)}.mkv")
+    end
+
     # True when Windows-native ffmpeg.exe will be used for conversions.
     def windows_ffmpeg?
       @use_windows_ffmpeg
@@ -209,6 +237,52 @@ module VideoTranscode
     end
 
     private
+
+    # Attempt to parse "Title (Year) - 720p" from a scene filename.
+    # Returns nil if no year is found, triggering the fallback path.
+    def parse_plex_name(base_no_ext)
+      # Match first 4-digit year between 1900-2099 not part of a larger number
+      match = base_no_ext.match(/\b((?:19|20)\d{2})\b/)
+      return nil unless match
+
+      year = match[1]
+      title = base_no_ext[0...match.begin(0)].gsub('.', ' ').gsub('_', ' ').strip
+      title = title.gsub(/\s{2,}/, ' ')
+
+      # Don't produce empty or meaningless titles
+      return nil if title.empty? || title.length < 1
+
+      "#{title} (#{year}) - 720p"
+    end
+
+    # Fallback: in-place tag substitution when Plex name parsing fails.
+    def replace_tags_fallback(base_no_ext)
+      result = base_no_ext.dup
+
+      # Replace resolution tags
+      result.gsub!(/\b2160p\b/i, '720p')
+      result.gsub!(/\b1080p\b/i, '720p')
+      result.gsub!(/\b4[kK]\b/, '720p')
+      result.gsub!(/\bUHD\b/i, '720p')
+
+      # Normalize H.264 codec tags
+      result.gsub!(/\bx265\b/i, 'x264')
+      result.gsub!(/\bh\.?265\b/i, 'x264')
+      result.gsub!(/\bHEVC\b/i, 'x264')
+      result.gsub!(/\bAVC\b/i, 'x264')
+      result.gsub!(/\bh\.?264\b/i, 'x264')
+
+      # Strip group tags: [GROUP] or -GROUP at end before extension
+      result.gsub!(/\s*[-_.]\s*\[[^\]]+\]\s*$/, '')
+      result.gsub!(/\s*[-_.]\s*-[A-Za-z0-9]+\s*$/, '')
+
+      # If no resolution tag remains, append 720p
+      unless result.match?(/\b\d{3,4}p\b/i)
+        result = "#{result}.720p"
+      end
+
+      result.strip
+    end
 
     def video_extension?(filename)
       VIDEO_EXTENSION_REGEX.match?(filename)
@@ -257,6 +331,21 @@ module VideoTranscode
       system('where.exe ffmpeg.exe > /dev/null 2>&1') == true
     rescue StandardError
       false
+    end
+
+    # Resolve filename collisions by appending an incrementing suffix.
+    def unique_path(path)
+      return path unless File.exist?(path)
+
+      dir = File.dirname(path)
+      base = File.basename(path, '.mkv')
+      counter = 1
+      loop do
+        candidate = File.join(dir, "#{base}-#{counter}.mkv")
+        return candidate unless File.exist?(candidate)
+
+        counter += 1
+      end
     end
 
     def format_bytes(bytes)
