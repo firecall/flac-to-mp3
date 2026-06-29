@@ -194,7 +194,9 @@ module FlacToMp3
   class DualLogger
     attr_reader :log_path
 
-    def initialize(log_dir: Dir.pwd)
+    def initialize(log_dir: nil)
+      log_dir ||= File.join(Dir.pwd, 'log')
+      FileUtils.mkdir_p(log_dir)
       timestamp = Time.now.strftime('%Y-%m-%d-%H%M%S')
       @log_path = File.join(log_dir, "flac-to-mp3-#{timestamp}.log")
       @file = File.open(@log_path, 'a')

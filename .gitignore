@@ -1,4 +1,5 @@
 .env
+/log/
 *.log
 .ruby-lsp/
 .claude/settings.local.json
