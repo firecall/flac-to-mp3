@@ -356,18 +356,18 @@ module VideoTranscode
 
       if encoder == 'h264_nvenc'
         args += [
-          '-preset', 'p7',
+          '-preset', 'p4',
           '-rc', 'vbr_hq',
           '-cq', '18',
           '-b:v', '0',
           '-maxrate', '5000k',
           '-bufsize', '10000k',
-          '-bf', '4',
+          '-bf', '3',
           '-profile:v', 'high'
         ]
       else
-        # Software x264: CRF-based quality, "slow" preset
-        args += ['-preset', 'slow', '-crf', '18', '-profile:v', 'high']
+        # Software x264: CRF-based quality, "medium" preset
+        args += ['-preset', 'medium', '-crf', '18', '-profile:v', 'high']
       end
 
       args + [
