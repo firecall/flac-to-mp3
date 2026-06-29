@@ -1,0 +1,182 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Video Transcode
+#
+# Converts video files (mkv, mp4, avi, etc.) to 720p H.264 MKV using NVENC.
+# Resizes video to 720p if larger, copies audio as-is, and discards originals
+# only when the transcoded file is smaller.
+#
+# Usage:
+#   bin/video-transcode                        # uses VIDEO_MEDIA_PATH env var or default
+#   bin/video-transcode --path /my/media       # explicit path
+#   bin/video-transcode --path /my/media --dry-run  # preview only, no changes
+#   bin/video-transcode --jobs 1               # parallel workers (default: 1)
+#   bin/video-transcode --help                 # show help
+#
+# Environment:
+#   VIDEO_MEDIA_PATH    Default directory to scan
+
+require 'optparse'
+require_relative '../lib/video_transcode'
+
+# Auto-load .env from the project root if present
+env_file = File.expand_path('../.env', __dir__)
+if File.exist?(env_file)
+  File.foreach(env_file) do |line|
+    line = line.strip
+    next if line.empty? || line.start_with?('#')
+
+    key, value = line.split('=', 2)
+    ENV[key] ||= value.to_s.delete_prefix('"').delete_suffix('"').delete_prefix("'").delete_suffix("'")
+  end
+end
+
+def configure_opts(opts, options)
+  opts.banner = 'Usage: bin/video-transcode [options]'
+  opts.on('-p', '--path PATH', 'Media directory path (overrides VIDEO_MEDIA_PATH env var)') { |p| options[:path] = p }
+  opts.on('-n', '--dry-run', 'Preview mode: show what would happen without making changes') { options[:dry_run] = true }
+  opts.on('-j', '--jobs N', Integer, 'Parallel ffmpeg workers (default: 1)') { |n| options[:jobs] = n }
+  opts.on('-h', '--help', 'Show this help message') do
+    puts opts
+    exit 0
+  end
+end
+
+def resolve_path(options)
+  options[:path] ||= ENV.fetch('VIDEO_MEDIA_PATH', nil)
+  if options[:path].nil?
+    options[:path] = '/mnt/c/Users/alex/PLEX MEDIA'
+  end
+
+  options
+end
+
+def parse_options
+  options = { path: nil, dry_run: false, jobs: 1 }
+  OptionParser.new { |opts| configure_opts(opts, options) }.parse!
+  resolve_path(options)
+end
+
+def validate_ffmpeg(path)
+  return if system('which ffmpeg > /dev/null 2>&1')
+  return if path.match?(%r{^/mnt/[a-z]/}i) && system('where.exe ffmpeg.exe > /dev/null 2>&1')
+
+  abort '[ERROR] ffmpeg not found. Install ffmpeg, or for Windows paths ensure ffmpeg.exe is on the Windows PATH.'
+end
+
+def validate_nvenc
+  # Check if the NVENC encoder is available
+  output = `ffmpeg -hide_banner -encoders 2>&1`
+  return if output.include?('h264_nvenc')
+
+  output = `where.exe ffmpeg.exe 2>nul && ffmpeg.exe -hide_banner -encoders 2>&1` if ENV['WSL_DISTRO_NAME']
+  return if output.include?('h264_nvenc')
+
+  abort '[ERROR] NVENC encoder (h264_nvenc) not available. Install an NVIDIA GPU driver and ffmpeg with NVENC support.'
+end
+
+def validate_environment(path)
+  validate_ffmpeg(path)
+  validate_nvenc
+  expanded = File.expand_path(path)
+  abort "[ERROR] Directory not found: #{expanded}" unless Dir.exist?(expanded)
+end
+
+def ffmpeg_label(converter)
+  converter.windows_ffmpeg? ? 'ffmpeg.exe (Windows native)' : `which ffmpeg`.strip
+end
+
+# -- MAIN --------------------------------------------------------------------
+
+options = parse_options
+validate_environment(options[:path])
+
+converter = VideoTranscode::Converter.new(
+  path: options[:path],
+  dry_run: options[:dry_run]
+)
+logger = VideoTranscode::DualLogger.new
+
+mode_label = options[:dry_run] ? 'DRY-RUN' : 'LIVE'
+logger.log('=' * 50)
+logger.log("Video Transcode — #{mode_label} MODE")
+logger.log('=' * 50)
+logger.log("Target path : #{File.expand_path(options[:path])}")
+logger.log("FFmpeg      : #{ffmpeg_label(converter)}")
+logger.log("Encoder     : h264_nvenc (NVIDIA GPU)")
+logger.log("Target      : #{VideoTranscode::Converter::TARGET_WIDTH}x#{VideoTranscode::Converter::TARGET_HEIGHT} (max)")
+logger.log("Jobs        : #{options[:jobs]}")
+logger.log("Log file    : #{logger.log_path}")
+logger.log('=' * 50)
+
+start_time = Time.now
+logger.log('Scanning for video files...')
+
+found_count = 0
+if $stdout.tty?
+  scanning = true
+  spinner_thread = Thread.new do
+    frames = ['|', '/', '-', '\\']
+    i = 0
+    while scanning
+      print "\r  #{frames[i % 4]}  #{found_count} found"
+      $stdout.flush
+      sleep 0.1
+      i += 1
+    end
+    print "\r#{' ' * 25}\r"
+    $stdout.flush
+  end
+end
+
+video_files = converter.find_video_files { |n| found_count = n }
+
+if $stdout.tty?
+  scanning = false
+  spinner_thread.join
+end
+
+logger.log("Found #{video_files.length} video file(s) to check.")
+logger.log('')
+
+if video_files.empty?
+  logger.log('Nothing to do. Exiting.')
+  logger.close
+  exit 0
+end
+
+total = video_files.length
+queue = Queue.new
+video_files.each { |f| queue << f }
+options[:jobs].times { queue << nil }
+
+idx_mutex = Mutex.new
+current_idx = 0
+
+workers = Array.new(options[:jobs]) do
+  Thread.new do
+    while (video_path = queue.pop)
+      idx = idx_mutex.synchronize { current_idx += 1 }
+      logger.log("[#{idx}/#{total}] Processing: #{File.basename(video_path)}")
+      begin
+        converter.convert_file?(video_path, logger: logger)
+      rescue StandardError => e
+        converter.log_error("[ERROR] #{File.basename(video_path)}: #{e.message}", logger: logger)
+      end
+      logger.log('')
+    end
+  end
+end
+workers.each(&:join)
+
+elapsed = (Time.now - start_time).to_i
+
+logger.log_summary(
+  stats: converter.stats,
+  elapsed: elapsed,
+  logger: logger
+)
+
+logger.log("Full log saved to: #{logger.log_path}")
+logger.close

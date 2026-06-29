@@ -116,4 +116,123 @@ Nested directories are renamed deepest-first so parent renames don't invalidate 
 
 ---
 
+# Video Transcode
+
+Ruby script that recursively converts video files to 720p H.264 MKV using Nvidia NVENC hardware encoding. Designed to save disk space while preserving visual and audio quality.
+
+## Requirements
+
+- Ruby 4.0+
+- FFmpeg compiled with `h264_nvenc` encoder support
+- Nvidia GPU with NVENC hardware encoding capability
+- Nvidia GPU drivers installed
+
+### NVIDIA Driver & NVENC Setup (Linux)
+
+```bash
+# Install Nvidia drivers (Ubuntu/Debian)
+sudo apt install nvidia-driver-550
+
+# Verify NVENC is detected
+ffmpeg -hide_banner -encoders 2>&1 | grep h264_nvenc
+```
+
+If `h264_nvenc` is not shown, install an FFmpeg build that includes NVENC support:
+
+```bash
+# Linuxbrew / Homebrew
+brew install ffmpeg
+
+# Or from apt with non-free codecs
+sudo apt install ffmpeg
+```
+
+## Usage
+
+```bash
+# Using default path or VIDEO_MEDIA_PATH env var
+bin/video-transcode
+
+# Specify a custom path
+bin/video-transcode --path "/mnt/c/Users/alex/PLEX MEDIA"
+
+# Dry-run mode — preview only, no changes
+bin/video-transcode --dry-run
+bin/video-transcode -n --path /my/media
+
+# Adjust parallel workers (default: 1 — NVENC is GPU-limited)
+bin/video-transcode --jobs 1
+
+# Show help
+bin/video-transcode --help
+```
+
+## Configuration
+
+Set the `VIDEO_MEDIA_PATH` environment variable to avoid passing `--path` every time:
+
+```bash
+export VIDEO_MEDIA_PATH="/mnt/c/Users/alex/PLEX MEDIA"
+bin/video-transcode
+```
+
+Or copy `.env.example` to `.env` — the script loads it automatically.
+
+**Default fallback path:** `/mnt/c/Users/alex/PLEX MEDIA` (WSL path to Windows drive).
+
+**Path resolution order:**
+1. `--path` CLI argument
+2. `VIDEO_MEDIA_PATH` environment variable
+3. Hardcoded default
+
+## What It Does
+
+- Recursively finds video files: `.mkv`, `.mp4`, `.avi`, `.mov`, `.wmv`, `.m4v`, `.webm` (case-insensitive)
+- Probes each file with `ffprobe` to check resolution — skips files already ≤ 720p
+- Transcodes video to 720p H.264 using Nvidia NVENC with quality-focused settings
+- Audio is **stream-copied** (no re-encoding) to preserve original quality
+- Output is always `.mkv` container (all streams mapped)
+- After transcoding, compares file sizes:
+  - **Transcoded file smaller:** Deletes original, keeps transcoded file
+  - **Transcoded file larger or equal:** Deletes transcoded file, keeps original
+- Logs progress to both terminal and a timestamped log file
+- Prints a summary with files processed, failed, skipped, kept, time elapsed, and disk space saved
+
+## FFmpeg Encoding Settings
+
+Quality is prioritized over speed. The FFmpeg command uses community best practices for NVENC:
+
+```
+ffmpeg -y -i INPUT \
+  -c:v h264_nvenc \
+  -preset p7 \           # Slowest/best quality NVENC preset
+  -rc vbr_hq \           # High-quality variable bitrate mode
+  -cq 18 \               # Constant quality 18 (visually lossless)
+  -b:v 0 \               # No bitrate ceiling in CQ mode
+  -maxrate 5000k \       # Cap peak bitrate at 5 Mbps
+  -bufsize 10000k \      # 10 MB buffer for rate control
+  -bf 4 \                # 4 B-frames for compression efficiency
+  -profile:v high \      # High profile for best compression
+  -pix_fmt yuv420p \     # Wide compatibility pixel format
+  -vf "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease" \
+  -c:a copy \            # Copy audio without re-encoding
+  -map 0 \               # Include all streams
+  OUTPUT.mkv
+```
+
+The scale filter ensures:
+- Videos wider than 1280 or taller than 720 are resized down
+- Aspect ratio is preserved
+- Videos already ≤ 720p are **not** upscaled
+
+## Dry-Run Mode
+
+`--dry-run` or `-n` shows exactly what would happen without converting or deleting anything: which files would be transcoded, which would be skipped, and which would be kept.
+
+## Why Default Jobs = 1
+
+NVENC is a hardware encoder — running multiple simultaneous encodes on the same GPU causes all jobs to slow down dramatically and often produces worse total throughput than sequential encoding. The default of 1 worker is deliberate. Users with multiple GPUs can increase `--jobs` accordingly.
+
+---
+
 Built with [Claude Code](https://claude.ai/code).
