@@ -6,6 +6,7 @@ require 'find'
 require 'time'
 require 'json'
 require 'open3'
+require 'tempfile'
 
 module VideoTranscode
   # Video file extensions that the converter will process.
@@ -97,35 +98,33 @@ module VideoTranscode
     end
 
     # Run the NVENC ffmpeg transcode. Returns true on success.
-    # Falls back to software x264 if NVENC fails, logging stderr for debugging.
+    # Falls back to software x264 if NVENC fails, logging tail of stderr for debugging.
     def run_transcode(source_path, mkv_path, logger)
       # Try NVENC first
       cmd = ffmpeg_command(source_path, mkv_path, 'h264_nvenc')
-      stdout, stderr, status = Open3.capture3(*cmd)
+      nvenc_ok = run_ffmpeg_with_stderr(cmd, logger, 'NVENC')
 
-      if status.success?
+      if nvenc_ok
         logger&.log("[OK] Transcoded (NVENC): #{File.basename(source_path)} -> #{File.basename(mkv_path)}")
         return true
       end
 
-      # NVENC failed — log stderr and try software fallback
+      # NVENC failed — log and try software fallback
       logger&.log("[WARN] NVENC failed, trying software x264: #{File.basename(source_path)}")
-      logger&.log("[DEBUG] NVENC stderr: #{stderr.lines.first(3).map(&:strip).join(' | ')}") unless stderr.strip.empty?
 
       # Clean up partial NVENC output
       File.delete(mkv_path) if File.exist?(mkv_path)
 
       # Fallback: software x264 with equivalent quality settings
       fallback_cmd = ffmpeg_command(source_path, mkv_path, 'libx264')
-      _stdout2, stderr2, status2 = Open3.capture3(*fallback_cmd)
+      x264_ok = run_ffmpeg_with_stderr(fallback_cmd, logger, 'x264')
 
-      if status2.success?
+      if x264_ok
         @mutex.synchronize { @stats[:retried] += 1 }
         logger&.log("[OK] Transcoded (x264): #{File.basename(source_path)} -> #{File.basename(mkv_path)}")
         true
       else
         logger&.log("[FAIL] Both NVENC and x264 failed on: #{File.basename(source_path)}")
-        logger&.log("[DEBUG] x264 stderr: #{stderr2.lines.first(3).map(&:strip).join(' | ')}") unless stderr2.strip.empty?
         File.delete(mkv_path) if File.exist?(mkv_path)
         false
       end
@@ -133,6 +132,27 @@ module VideoTranscode
       logger&.log("[FAIL] #{File.basename(source_path)}: #{e.message}")
       File.delete(mkv_path) if File.exist?(mkv_path)
       false
+    end
+
+    # Run an ffmpeg command and capture the last 10 lines of stderr to a temp file.
+    # Logs the tail on failure. Returns true on success.
+    def run_ffmpeg_with_stderr(cmd, logger, label)
+      err_file = Tempfile.new(['video-transcode', '.err'])
+      err_path = err_file.path
+      err_file.close # keep file on disk, ffmpeg will overwrite it
+
+      success = system(*cmd, err: [err_path, 'a'])
+
+      unless success
+        err_lines = File.readlines(err_path)
+        # Grab the last 15 non-empty lines (the actual error, not the 100-line config banner)
+        tail = err_lines.reject { |l| l.strip.empty? }.last(15).map(&:strip).join(' | ')
+        logger&.log("[DEBUG] #{label} stderr (last 15 lines): #{tail}") unless tail.empty?
+      end
+
+      success
+    ensure
+      File.delete(err_path) if err_path && File.exist?(err_path)
     end
 
     # Transcode an already-.mkv file to a temp file, then compare sizes.
