@@ -145,9 +145,13 @@ module VideoTranscode
 
       unless success
         err_lines = File.readlines(err_path)
-        # Grab the last 15 non-empty lines (the actual error, not the 100-line config banner)
         tail = err_lines.reject { |l| l.strip.empty? }.last(15).map(&:strip).join(' | ')
         logger&.log("[DEBUG] #{label} stderr (last 15 lines): #{tail}") unless tail.empty?
+
+        # Write full error log to a separate file for deep debugging
+        err_log = err_path.sub('.err', '.ffmpeg-errors.log')
+        File.write(err_log, err_lines.join)
+        logger&.log("[DEBUG] Full #{label} error log: #{err_log}")
       end
 
       success
@@ -158,7 +162,8 @@ module VideoTranscode
     # Transcode an already-.mkv file to a temp file, then compare sizes.
     # Avoids ffmpeg reading and writing the same file simultaneously.
     def transcode_mkv_in_place(source_path, logger)
-      tmp_path = "#{source_path}.tmp"
+      # FFmpeg detects output format from the file extension, so .mkv must be last.
+      tmp_path = source_path.sub(/\.mkv$/i, '.transcoding.mkv')
       unless run_transcode(source_path, tmp_path, logger)
         @mutex.synchronize { @stats[:failed] += 1 }
         return false

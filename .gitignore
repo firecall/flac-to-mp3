@@ -1,6 +1,7 @@
 .env
 /log/
 *.log
+*.ffmpeg-errors.log
 .ruby-lsp/
 .claude/settings.local.json
 *.gem
