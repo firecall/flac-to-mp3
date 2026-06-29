@@ -62,7 +62,11 @@ module VideoTranscode
     def convert_file?(source_path, logger: nil)
       mkv_path = new_mkv_path(source_path)
 
-      return skip_existing?(mkv_path, logger) if File.exist?(mkv_path)
+      # Only skip if output exists AND is a different file from the source.
+      # (When source is already .mkv, mkv_path == source_path — that's not a skip.)
+      if mkv_path != source_path && File.exist?(mkv_path)
+        return skip_existing?(mkv_path, logger)
+      end
 
       unless needs_transcode?(source_path)
         logger&.log("[SKIP] Already ≤ #{TARGET_HEIGHT}p: #{File.basename(source_path)}")
@@ -72,7 +76,13 @@ module VideoTranscode
 
       return dry_run_convert?(source_path, mkv_path, logger) if dry_run
 
-      transcode_and_compare(source_path, mkv_path, logger)
+      # When source is already .mkv, transcode to a temp file to avoid
+      # ffmpeg reading and writing the same file simultaneously.
+      if mkv_path == source_path
+        transcode_mkv_in_place(source_path, logger)
+      else
+        transcode_and_compare(source_path, mkv_path, logger)
+      end
     end
 
     # After transcoding, compare file sizes. Keep whichever is smaller.
@@ -102,6 +112,36 @@ module VideoTranscode
       logger&.log("[FAIL] #{File.basename(source_path)}: #{e.message}")
       File.delete(mkv_path) if File.exist?(mkv_path)
       false
+    end
+
+    # Transcode an already-.mkv file to a temp file, then compare sizes.
+    # Avoids ffmpeg reading and writing the same file simultaneously.
+    def transcode_mkv_in_place(source_path, logger)
+      tmp_path = "#{source_path}.tmp"
+      unless run_transcode(source_path, tmp_path, logger)
+        @mutex.synchronize { @stats[:failed] += 1 }
+        return false
+      end
+
+      source_size = File.size(source_path)
+      tmp_size = File.size(tmp_path)
+
+      if tmp_size < source_size
+        saved = source_size - tmp_size
+        @mutex.synchronize { @stats[:space_saved_bytes] += saved }
+        File.delete(source_path)
+        File.rename(tmp_path, source_path)
+        logger&.log("[DEL] Replaced original with smaller transcode: #{File.basename(source_path)} " \
+                    "(saved #{format_bytes(saved)})")
+        @mutex.synchronize { @stats[:processed] += 1 }
+      else
+        File.delete(tmp_path)
+        logger&.log("[KEEP] Transcoded file not smaller " \
+                    "(#{format_bytes(tmp_size)} vs #{format_bytes(source_size)}): " \
+                    "#{File.basename(source_path)}")
+        @mutex.synchronize { @stats[:kept] += 1 }
+      end
+      true
     end
 
     # Compare sizes: if transcoded is smaller, delete original and keep transcoded.

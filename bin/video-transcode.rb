@@ -46,7 +46,7 @@ end
 def resolve_path(options)
   options[:path] ||= ENV.fetch('VIDEO_MEDIA_PATH', nil)
   if options[:path].nil?
-    options[:path] = '/mnt/c/Users/alex/PLEX MEDIA'
+    options[:path] = '/mnt/c/Users/alex/PLEX MEDIA/MOVIES'
   end
 
   options
