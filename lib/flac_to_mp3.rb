@@ -165,8 +165,8 @@ module FlacToMp3
       exe = @use_windows_ffmpeg ? 'ffmpeg.exe' : 'ffmpeg'
       src = @use_windows_ffmpeg ? to_windows_path(flac_path) : flac_path
       dst = @use_windows_ffmpeg ? to_windows_path(mp3_path) : mp3_path
-      [exe, '-y', '-i', src, '-codec:a', 'libmp3lame', '-qscale:a', '2',
-       '-map_metadata', '0', '-id3v2_version', '3', dst]
+      [exe, '-y', '-i', src, '-codec:a', 'libmp3lame', '-b:a', '320k',
+       '-map_metadata', '0', '-id3v2_version', '3', '-vn', '-nostdin', dst]
     end
 
     def run_ffmpeg?(flac_path, mp3_path, logger)
